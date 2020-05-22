@@ -143,6 +143,8 @@ def get_data_dir_path(path):
 
 def get_optimized_paths(args, data_storage_path):
     optimized = []
+    if not os.path.exists(data_storage_path) or not os.path.isfile(data_storage_path):
+        return optimized
     with open(data_storage_path, mode='r') as csv_file:
         csv_reader = csv.DictReader(csv_file)
         for i in csv_reader:
