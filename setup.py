@@ -8,7 +8,7 @@ except ImportError:
 
 setup(
     name='megaoptim',
-    version='1.0.3',
+    version='1.1.0',
     description='MegaOptim API Client',
     long_description='Python library for working with the powerful MegaOptim.com Image Optimization RESTful services',
     url='https://github.com/megaoptim/megaoptim-python',

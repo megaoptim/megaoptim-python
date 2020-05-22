@@ -1,13 +1,13 @@
 import logging
 import argparse
 import os
-import glob
+import sys
 import csv
 import errno
 import time
 import datetime
-
 import requests
+import traceback
 
 from megaoptim.client.client import Client
 
@@ -20,14 +20,13 @@ def log_output(args, text, level="standard"):
         return
     if level == 'verbose':
         if 'verbose' in args and args.verbose == 1:
-            print current_time + " - " + text
+            print(current_time + " - " + text)
     else:
-        print current_time + " - " + text
+        print(current_time + " - " + text)
 
 
 def create_args():
-    parser = argparse.ArgumentParser(prog='megaoptim',
-                                     description='Commandline interface for MegaOptim Image Optimizer')
+    parser = argparse.ArgumentParser(prog='megaoptim',description='Commandline interface for MegaOptim Image Optimizer')
 
     parser.add_argument(
         '--api-key',
@@ -100,6 +99,15 @@ def create_args():
         action='store_true',
         help='Suppresses all the output.'
     )
+
+    group.add_argument(
+        '-r',
+        '--recursive',
+        default='0',
+        choices=['1', '0'],
+        help='If selected 1 it will optimize the images recursively.'
+    )
+
     return parser.parse_args()
 
 
@@ -142,19 +150,35 @@ def get_optimized_paths(args, data_storage_path):
     return optimized
 
 
-def scan_remaining_images(args, dir):
-    types = (dir + os.sep + '*.jpg', dir + os.sep + '*.gif', dir + os.sep + '*.png')
-    files_grabbed = []
-    for files in types:
-        files_grabbed.extend(glob.glob(files))
+def find_files_recursive(treeroot):
+    file_iterator = (os.path.join(root, f)
+                for root, _, files in os.walk(treeroot)
+                for f in files)
+    return (f for f in file_iterator if (os.path.splitext(f)[1] in ['.jpg', '.jpeg', '.png', '.gif']))
 
-    data_storage_path = get_data_dir_path(dir)
-    if os.path.exists(data_storage_path):
-        optimized = get_optimized_paths(args, get_data_dir_path(dir))
-        if len(optimized) > 0:
-            filtered = [x for x in files_grabbed if x not in optimized]
-            files_grabbed = filtered
-            del filtered
+def find_files(treeroot):
+    return [os.path.join(treeroot, f) for f in os.listdir(treeroot) if (os.path.splitext(f)[1] in ['.jpg', '.jpeg', '.png', '.gif'])]
+
+def scan_remaining_images(args, dir, recursive):
+    if(recursive):
+        files_grabbed = find_files_recursive(dir)
+    else:
+        files_grabbed = find_files(dir)
+
+    # Create unique directories list and collect all the optimized paths.
+    # If recursive=true it will go recursively.
+    directories = []
+    optimized = []
+    for file in files_grabbed:
+        directories.append(os.path.dirname(file))
+    directories = list(set(directories))
+    for subDir in directories:
+        optimized += get_optimized_paths(args, get_data_dir_path(subDir))
+
+    if len(optimized) > 0:
+        filtered = [x for x in files_grabbed if x not in optimized]
+        files_grabbed = filtered
+        del filtered
 
     return files_grabbed
 
@@ -181,8 +205,17 @@ def save_file(args, url, save_path):
     return status
 
 
-def optimize_dir(args, client, currentdir, outdir, params):
-    files = scan_remaining_images(args, dir=currentdir)
+def dump_object(obj):
+  for attr in dir(obj):
+    print("obj.%s = %r" % (attr, getattr(obj, attr)))
+
+
+def optimize_dir(args, client, currentdir, outdir, params, recursive):
+    files = list(scan_remaining_images(args, currentdir, recursive))
+
+    if len(files) == 0:
+        print('No unoptimized files found.')
+        return
 
     total_count = len(files)
     optimized_count = 0
@@ -205,13 +238,16 @@ def optimize_dir(args, client, currentdir, outdir, params):
             save_path = outdir + os.sep + file_name
         log_output(args, "Checking if the target path " + save_path + " is writable...", level="verbose")
         if outdir is not None and not os.access(outdir, os.W_OK):
-            raise StandardError("The save directory " + outdir + " is not writable :(")
+            raise Exception("The save directory " + outdir + " is not writable :(")
         else:
             log_output(args, "Processing file " + os.path.basename(item))
             r = client.optimize(item, params)
             if r.get('status') == 'ok' and r.get('code') == 200:
                 # Loop through results array from the response to get optimization info for every image in the request
                 for ritem in r.get('result'):
+                    if ritem['url'] is None:
+                        log_output(args,"Failed to save file " + os.path.basename(item) + ": Missing optimization url.")
+                        continue
                     ritem['old_path'] = item
                     ritem['optimized_path'] = save_file(args, url=ritem['url'], save_path=save_path)
                     if not ritem['optimized_path']:
@@ -226,8 +262,13 @@ def optimize_dir(args, client, currentdir, outdir, params):
                             total_saved += (ritem['saved_bytes'] / 1024) / 1024
                         total_size += ritem['original_size']
                         save_result(args, ritem)
+
+    overall_total_size = (total_size / 1024) / 1024
+    overall_total_size = round(overall_total_size, 2)
+    total_saved = round(total_saved, 2)
+
     log_output(args, "Directory " + currentdir + " successfully optimized!\n Total files count: " + str(
-        optimized_count) + " (" + str((total_size / 1024) / 1024) + " MB). Total space saved: " + str(
+        optimized_count) + " (" + str(overall_total_size) + " MB). Total space saved: " + str(
         total_saved) + " MB")
 
 
@@ -240,23 +281,35 @@ def do():
     # The api key is required. Bail if empty!
     if 'api_key' in args:
         api_key = args.api_key
+    if api_key is None:
+        print('Please enter valid API key. Sign up at megaoptim.com for one if you dont have.')
+        exit()
 
     # If --dir is not specified it will fallback to the current working directory.
-    if 'dir' in args:
+    if 'dir' in args and args.dir is not None:
         working_dir = os.path.realpath(args.dir)
     else:
         working_dir = os.getcwd()
 
     # If --outdir is not specified it will overwrite the files of the current direcotry. Use this with caution!
-    if 'outdir' in args:
-        outdir = os.path.realpath(args.outdir)
+    if 'outdir' in args and args.outdir is not None:
+        if(os.path.exists(args.outdir)):
+            outdir = os.path.realpath(args.outdir)
+        else:
+            outdir = None
+            print('The specified outdir does not exist.')
+            exit()
     else:
         outdir = None
 
+    if 'recursive' in args and args.recursive == '0':
+        recursive = False
+    else:
+        recursive = True
+
     try:
         client = Client(api_key)
-        optimize_dir(args, client, working_dir, outdir, params)
-    except StandardError as e:
-        print(e)
-
+        optimize_dir(args, client, working_dir, outdir, params, recursive)
+    except Exception as e:
+        print(traceback.format_exc())
 
