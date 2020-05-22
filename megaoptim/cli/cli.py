@@ -152,37 +152,43 @@ def get_optimized_paths(args, data_storage_path):
     return optimized
 
 
-def find_files_recursive(treeroot):
+def find_files_recursively(treeroot):
     file_iterator = (os.path.join(root, f)
                 for root, _, files in os.walk(treeroot)
                 for f in files)
-    return (f for f in file_iterator if (os.path.splitext(f)[1] in ['.jpg', '.jpeg', '.png', '.gif']))
+    files = (f for f in file_iterator if (os.path.splitext(f)[1] in ['.jpg', '.jpeg', '.png', '.gif']))
+    return list(files)
+
 
 def find_files(treeroot):
     return [os.path.join(treeroot, f) for f in os.listdir(treeroot) if (os.path.splitext(f)[1] in ['.jpg', '.jpeg', '.png', '.gif'])]
 
-def scan_remaining_images(args, dir, recursive):
-    if(recursive):
-        files_grabbed = find_files_recursive(dir)
+
+def scan_directory(args, directory, recursive):
+    if recursive:
+        found_files = find_files_recursively(directory)
     else:
-        files_grabbed = find_files(dir)
+        found_files = find_files(directory)
 
     # Create unique directories list and collect all the optimized paths.
     # If recursive=true it will go recursively.
     directories = []
     optimized = []
-    for file in files_grabbed:
+    for file in found_files:
         directories.append(os.path.dirname(file))
     directories = list(set(directories))
-    for subDir in directories:
-        optimized += get_optimized_paths(args, get_data_dir_path(subDir))
+
+    for subDirectory in directories:
+        _optimized_paths = get_optimized_paths(args, get_data_dir_path(subDirectory))
+        if len(_optimized_paths) > 0:
+            optimized.extend(_optimized_paths)
 
     if len(optimized) > 0:
-        filtered = [x for x in files_grabbed if x not in optimized]
-        files_grabbed = filtered
+        filtered = [x for x in found_files if x not in optimized]
+        found_files = filtered
         del filtered
 
-    return files_grabbed
+    return found_files
 
 
 def save_result(args, result):
@@ -213,7 +219,7 @@ def dump_object(obj):
 
 
 def optimize_dir(args, client, currentdir, outdir, params, recursive):
-    files = list(scan_remaining_images(args, currentdir, recursive))
+    files = list(scan_directory(args, currentdir, recursive))
 
     if len(files) == 0:
         print('No unoptimized files found.')
