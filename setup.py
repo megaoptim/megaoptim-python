@@ -1,5 +1,7 @@
 # coding=utf-8
 
+from megaoptim._version import __version__
+
 try:
     from setuptools import setup, find_packages
 except ImportError:
@@ -8,9 +10,9 @@ except ImportError:
 
 setup(
     name='megaoptim',
-    version='1.1.3',
+    version=__version__,
     description='MegaOptim API Client',
-    long_description='Python library for working with the powerful MegaOptim.com Image Optimization RESTful services',
+    long_description='Python library for working with the powerful MegaOptim.com Image Optimization RESTful APIs',
     url='https://github.com/megaoptim/megaoptim-python',
     author='IDEOLOGIX Media',
     author_email='info@megaoptim.com',

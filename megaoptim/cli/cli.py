@@ -1,13 +1,17 @@
 import logging
 import argparse
 import os
-import sys
 import csv
 import errno
 import time
 import datetime
 import requests
 import traceback
+import imghdr
+
+from megaoptim._version import __version__
+
+from Pillow import Image
 
 from megaoptim.client.client import Client
 
@@ -108,6 +112,8 @@ def create_args():
         help='If selected 1 it will optimize the images recursively.'
     )
 
+    parser.add_argument('--version', action='version', version='%(prog)s ' + __version__)
+
     return parser.parse_args()
 
 
@@ -156,12 +162,15 @@ def find_files_recursively(treeroot):
     file_iterator = (os.path.join(root, f)
                 for root, _, files in os.walk(treeroot)
                 for f in files)
-    files = (f for f in file_iterator if (os.path.splitext(f)[1] in ['.jpg', '.jpeg', '.png', '.gif']))
+    files = (f for f in file_iterator if (is_valid_image(f)))
     return list(files)
 
 
 def find_files(treeroot):
-    return [os.path.join(treeroot, f) for f in os.listdir(treeroot) if (os.path.splitext(f)[1] in ['.jpg', '.jpeg', '.png', '.gif'])]
+    sep = ''
+    if not treeroot.endswith('/'):
+        sep = os.path.sep
+    return [os.path.join(treeroot, f) for f in os.listdir(treeroot) if (is_valid_image(treeroot + sep + f))]
 
 
 def scan_directory(args, directory, recursive):
@@ -253,6 +262,9 @@ def optimize_dir(args, client, currentdir, outdir, params, recursive):
             if r.get('status') == 'ok' and r.get('code') == 200:
                 # Loop through results array from the response to get optimization info for every image in the request
                 for ritem in r.get('result'):
+                    if ritem['saved_bytes'] <= 0:
+                        log_output(args, "Skipping. Already optimized, no need more optimization.")
+                        continue
                     if ritem['url'] is None:
                         log_output(args,"Failed to save file " + os.path.basename(item) + ": Missing optimization url.")
                         continue
@@ -278,6 +290,22 @@ def optimize_dir(args, client, currentdir, outdir, params, recursive):
     log_output(args, "Directory " + currentdir + " successfully optimized!\n Total files count: " + str(
         optimized_count) + " (" + str(overall_total_size) + " MB). Total space saved: " + str(
         total_saved) + " MB")
+
+
+def is_valid_image_old(path):
+    img = Image.open(path)
+    try:
+        img.verify()
+        return img.format in ['JPEG', 'JPEG2000', 'PNG', 'GIF']
+    except Exception:
+        return False
+
+
+def is_valid_image(path):
+    if os.path.isdir(path):
+        return False
+    _format = imghdr.what(path)
+    return _format in ['jpeg', 'png', 'gif']
 
 
 def do():

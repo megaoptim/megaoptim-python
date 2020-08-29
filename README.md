@@ -7,7 +7,13 @@ The library implements the MegaOptim REST service for optimizing images. It is c
 ## Installation
 
 ```
-pip install megaoptim
+sudo pip install megaoptim
+```
+
+If you see error `ImportError: No module named PIL`, you need to install `Pillow` as well:
+
+```
+sudo pip install pillow
 ```
 
 ## Getting Started

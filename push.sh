@@ -1,6 +1,6 @@
 #!/bin/bash
 
 echo "Pushing to PyPi..."
-python setup.py sdist
+python3 setup.py sdist
 twine upload dist/*
 echo "Done..."
